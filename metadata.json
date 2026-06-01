@@ -1,0 +1,6 @@
+{
+  "name": "Aarikeron Study",
+  "description": "Plataforma de organización académica inteligente con calendario, control de tiempo por pomodoro, distribución automática de tareas y gestión de asignaturas.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

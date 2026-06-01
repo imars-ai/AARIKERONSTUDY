@@ -1,0 +1,27 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: var(--font-sans), Inter, system-ui, sans-serif;
+  --font-title: var(--font-title), Outfit, system-ui, sans-serif;
+
+  --color-accent-blue: #004ac6;
+  --color-brand-primary: #2563eb;
+  --color-brand-secondary: #4648d4;
+  --color-brand-tertiary: #943700;
+  
+  --color-brand-error: #ba1a1a;
+}
+
+@layer utilities {
+  .bento-card {
+    background: #ffffff;
+    border: 1px solid #e1e2ed;
+    border-radius: 1rem;
+    box-shadow: 0 4px 20px -4px rgba(0, 74, 198, 0.05);
+  }
+}
+
+/* Custom transitions and styles */
+.timer-circle {
+  transition: stroke-dashoffset 0.5s linear;
+}
