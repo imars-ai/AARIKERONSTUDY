@@ -1,0 +1,95 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile data",
+      "type": "object",
+      "properties": {
+        "userName": { "type": "string" },
+        "dailyLimitMinutes": { "type": "number" },
+        "alarms": {
+          "type": "object",
+          "properties": {
+            "cambioMateria": { "type": "boolean" },
+            "finSesion": { "type": "boolean" }
+          }
+        }
+      },
+      "required": ["userName"]
+    },
+    "Subject": {
+      "title": "Subject",
+      "description": "A subject or course",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "subtitle": { "type": "string" },
+        "color": { "type": "string" }
+      },
+      "required": ["userId", "name", "color"]
+    },
+    "Task": {
+      "title": "Task",
+      "description": "A user's task or assignment",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "date": { "type": "string" },
+        "subject": { "type": "string" },
+        "estimatedMinutes": { "type": "number" },
+        "workload": { "type": "string", "enum": ["Alta", "Media", "Óptima"] },
+        "isCompleted": { "type": "boolean" }
+      },
+      "required": ["userId", "title", "date", "subject", "estimatedMinutes", "workload", "isCompleted"]
+    },
+    "CalendarEvent": {
+      "title": "Calendar Event",
+      "description": "An event on the user's calendar",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "date": { "type": "number" },
+        "type": { "type": "string", "enum": ["Exámenes", "Trabajos", "Deberes"] },
+        "time": { "type": "string" }
+      },
+      "required": ["userId", "title", "date", "type", "time"]
+    },
+    "Extracurricular": {
+      "title": "Extracurricular",
+      "description": "An extracurricular activity",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "days": { "type": "string" },
+        "time": { "type": "string" }
+      },
+      "required": ["userId", "title", "days", "time"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Primary user profile data"
+    },
+    "subjects/{subjectId}": {
+      "schema": { "$ref": "#/entities/Subject" },
+      "description": "User subjects"
+    },
+    "tasks/{taskId}": {
+      "schema": { "$ref": "#/entities/Task" },
+      "description": "User tasks"
+    },
+    "calendarEvents/{eventId}": {
+      "schema": { "$ref": "#/entities/CalendarEvent" },
+      "description": "User calendar events"
+    },
+    "extracurriculars/{activityId}": {
+      "schema": { "$ref": "#/entities/Extracurricular" },
+      "description": "User extracurricular activities"
+    }
+  }
+}

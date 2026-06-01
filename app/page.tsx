@@ -2,6 +2,9 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { auth, db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
+import { doc, getDoc, setDoc, onSnapshot, updateDoc, collection, query, where, deleteDoc } from 'firebase/firestore';
 import {
   Plus,
   Calendar,
@@ -76,11 +79,134 @@ export default function Home() {
   // Screens state
   const [screen, setScreen] = useState<'login' | 'app'>('login');
   
+  // Auth state
+  const [user, setUser] = useState<FirebaseUser | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setAuthLoading(false);
+      if (currentUser) {
+        setScreen('app'); // skip login if already logged in
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleLogin = async () => {
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+      setScreen('app');
+    } catch (error) {
+      console.error('Error logging in', error);
+      alert('Hubo un error al iniciar sesión.');
+    }
+  };
+
+  // Data fetching
+  useEffect(() => {
+    if (!user) return; // Only sync if authenticated
+
+    const fetchUserDoc = async () => {
+      try {
+        const userRef = doc(db, 'users', user.uid);
+        const userSnap = await getDoc(userRef);
+        if (userSnap.exists()) {
+          const data = userSnap.data();
+          setUserName(data.userName);
+          if (data.dailyLimitMinutes) setDailyLimitMinutes(data.dailyLimitMinutes);
+          if (data.alarms) setAlarms(data.alarms);
+        } else {
+          // Create initial user doc
+          try {
+            await setDoc(userRef, {
+              userName: user.displayName?.split(' ')[0] || 'Estudiante',
+              dailyLimitMinutes: 320,
+              alarms: { cambioMateria: true, finSesion: false },
+              createdAt: new Date(),
+              updatedAt: new Date()
+            });
+            setUserName(user.displayName?.split(' ')[0] || 'Estudiante');
+          } catch (createErr) {
+            handleFirestoreError(createErr, OperationType.CREATE, `users/${user.uid}`);
+          }
+        }
+      } catch (err) {
+        handleFirestoreError(err, OperationType.GET, `users/${user.uid}`);
+      }
+    };
+    fetchUserDoc();
+
+    // Subjects Sync
+    const subjectsUnsub = onSnapshot(query(collection(db, 'subjects'), where('userId', '==', user.uid)), (snapshot) => {
+      const s: Subject[] = [];
+      snapshot.forEach((doc) => {
+        const d = doc.data();
+        s.push({
+          id: doc.id,
+          name: d.name,
+          subtitle: d.subtitle,
+          color: d.color,
+          // simulated values for metrics
+          tasksCount: 0,
+          workload: 'Óptima',
+          progressVal: 0,
+          iconName: 'book'
+        });
+      });
+      if (s.length > 0) setSubjects(s);
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'subjects'));
+
+    // Tasks Sync
+    const tasksUnsub = onSnapshot(query(collection(db, 'tasks'), where('userId', '==', user.uid)), (snapshot) => {
+      const t: Task[] = [];
+      snapshot.forEach((doc) => {
+        const d = doc.data();
+        t.push({
+          id: doc.id,
+          title: d.title,
+          subject: d.subject,
+          dueDate: d.date,
+          duration: d.estimatedMinutes,
+          workload: d.workload,
+          completed: d.isCompleted,
+        });
+      });
+      if (t.length > 0) setTasks(t);
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'tasks'));
+
+    // Calendar Events Sync
+    const calUnsub = onSnapshot(query(collection(db, 'calendarEvents'), where('userId', '==', user.uid)), (snapshot) => {
+      const evs: CalendarEvent[] = [];
+      snapshot.forEach((doc) => {
+        const d = doc.data();
+        evs.push({
+          id: doc.id,
+          day: d.date,
+          title: d.title,
+          time: d.time,
+          type: d.type as any,
+          subtitle: ''
+        });
+      });
+      if (evs.length > 0) setCalendarEvents(evs);
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'calendarEvents'));
+
+    return () => {
+      subjectsUnsub();
+      tasksUnsub();
+      calUnsub();
+    };
+  }, [user]);
+  
   // App navigation state
   const [activeTab, setActiveTab] = useState<'dashboard' | 'calendar' | 'subjects' | 'smart_org' | 'study_time'>('dashboard');
   
   // User name input
   const [userName, setUserName] = useState('Alejandro');
+  const [dailyLimitMinutes, setDailyLimitMinutes] = useState(320);
   
   // Interactive mock Database State
   const [subjects, setSubjects] = useState<Subject[]>([
@@ -331,7 +457,26 @@ export default function Home() {
       iconName: randomIcon
     };
 
-    setSubjects(prev => [...prev, newSub]);
+    if (user) {
+      const subjectRef = doc(collection(db, 'subjects'));
+      const subjectId = subjectRef.id;
+      newSub.id = subjectId;
+      try {
+        setDoc(subjectRef, {
+          userId: user.uid,
+          name: newSub.name,
+          subtitle: newSub.subtitle,
+          color: newSub.color,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        }).catch(err => handleFirestoreError(err, OperationType.CREATE, `subjects/${subjectId}`));
+      } catch (err) {
+        handleFirestoreError(err, OperationType.CREATE, `subjects/${subjectId}`);
+      }
+    } else {
+      setSubjects(prev => [...prev, newSub]);
+    }
+    
     setNewSubjectName('');
     setNewSubjectSubtitle('');
     alert(`¡Perfecto! Hemos añadido la asignatura "${newSub.name}" al plan.`);
@@ -358,21 +503,55 @@ export default function Home() {
       dayDistribution: randomDist
     };
 
-    setTasks(prev => [newTask, ...prev]);
-
-    // Update subject counters
-    setSubjects(prev => prev.map(sub => {
-      if (sub.name.toLowerCase() === taskFormSubject.toLowerCase()) {
-        const nextCount = sub.tasksCount + 1;
-        return {
-          ...sub,
-          tasksCount: nextCount,
-          workload: nextCount > 4 ? 'Alta' : nextCount > 1 ? 'Media' : 'Óptima',
-          progressVal: Math.min(100, sub.progressVal + 10)
-        };
+    if (user) {
+      const taskRef = doc(collection(db, 'tasks'));
+      const taskId = taskRef.id;
+      newTask.id = taskId;
+      try {
+        setDoc(taskRef, {
+          userId: user.uid,
+          title: newTask.title,
+          date: newTask.dueDate,
+          subject: newTask.subject,
+          estimatedMinutes: newTask.duration,
+          workload: newTask.workload,
+          isCompleted: newTask.completed,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        }).catch(err => handleFirestoreError(err, OperationType.CREATE, `tasks/${taskId}`));
+      } catch (err) {
+        handleFirestoreError(err, OperationType.CREATE, `tasks/${taskId}`);
       }
-      return sub;
-    }));
+      
+      // Update subject count locally since we do this on snapshot locally
+      // Firestore subject doesn't hold count, local map does.
+      setSubjects(prev => prev.map(sub => {
+        if (sub.name.toLowerCase() === taskFormSubject.toLowerCase()) {
+          const nextCount = sub.tasksCount + 1;
+          return {
+            ...sub,
+            tasksCount: nextCount,
+            workload: nextCount > 4 ? 'Alta' : nextCount > 1 ? 'Media' : 'Óptima',
+            progressVal: Math.min(100, sub.progressVal + 10)
+          };
+        }
+        return sub;
+      }));
+    } else {
+      setTasks(prev => [newTask, ...prev]);
+      setSubjects(prev => prev.map(sub => {
+        if (sub.name.toLowerCase() === taskFormSubject.toLowerCase()) {
+          const nextCount = sub.tasksCount + 1;
+          return {
+            ...sub,
+            tasksCount: nextCount,
+            workload: nextCount > 4 ? 'Alta' : nextCount > 1 ? 'Media' : 'Óptima',
+            progressVal: Math.min(100, sub.progressVal + 10)
+          };
+        }
+        return sub;
+      }));
+    }
 
     // Reset Form
     setTaskFormTitle('');
@@ -382,7 +561,14 @@ export default function Home() {
   };
 
   // Delete Task
-  const handleDeleteTask = (id: string, subjectName: string) => {
+  const handleDeleteTask = async (id: string, subjectName: string) => {
+    if (user) {
+      try {
+        await deleteDoc(doc(db, 'tasks', id));
+      } catch (err) {
+        handleFirestoreError(err, OperationType.DELETE, `tasks/${id}`);
+      }
+    }
     setTasks(prev => prev.filter(t => t.id !== id));
     setSubjects(prev => prev.map(sub => {
       if (sub.name.toLowerCase() === subjectName.toLowerCase()) {
@@ -399,11 +585,24 @@ export default function Home() {
   };
 
   // Task selection checklist trigger
-  const handleToggleTask = (id: string) => {
-    setTasks(prev => prev.map(t => {
-      if (t.id === id) {
-        return { ...t, completed: !t.completed };
+  const handleToggleTask = async (id: string) => {
+    const task = tasks.find(t => t.id === id);
+    if (!task) return;
+    const newCompleted = !task.completed;
+
+    if (user) {
+      try {
+        await updateDoc(doc(db, 'tasks', id), {
+          isCompleted: newCompleted,
+          updatedAt: new Date()
+        });
+      } catch (err) {
+        handleFirestoreError(err, OperationType.UPDATE, `tasks/${id}`);
       }
+    }
+    
+    setTasks(prev => prev.map(t => {
+      if (t.id === id) return { ...t, completed: newCompleted };
       return t;
     }));
   };
@@ -439,7 +638,28 @@ export default function Home() {
       type: newCalType,
       subtitle: 'Sesión planificada por el usuario.'
     };
-    setCalendarEvents(prev => [...prev, newEv]);
+
+    if (user) {
+      const evRef = doc(collection(db, 'calendarEvents'));
+      const evId = evRef.id;
+      newEv.id = evId;
+      try {
+        setDoc(evRef, {
+          userId: user.uid,
+          title: newEv.title,
+          date: newEv.day,
+          type: newEv.type,
+          time: newEv.time,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        }).catch(err => handleFirestoreError(err, OperationType.CREATE, `calendarEvents/${evId}`));
+      } catch (err) {
+        handleFirestoreError(err, OperationType.CREATE, `calendarEvents/${evId}`);
+      }
+    } else {
+      setCalendarEvents(prev => [...prev, newEv]);
+    }
+
     setNewCalTitle('');
     alert(`¡Nueva actividad de ${newCalType} registrada para el día ${selectedDay}!`);
   };
@@ -496,14 +716,31 @@ export default function Home() {
 
               {/* Login Actions */}
               <div className="w-full flex flex-col gap-3">
-                <button 
-                  onClick={() => setScreen('app')}
-                  className={`w-full h-12 font-title font-bold rounded-full transition-all cursor-pointer active:scale-95 duration-300 flex items-center justify-center gap-2 ${
-                    darkMode ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-[#2563eb] text-white hover:bg-[#004ac6]'
-                  }`}
-                >
-                  Continuar como Invitado
-                </button>
+                {authLoading ? (
+                  <div className="w-full h-12 flex items-center justify-center">
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-[#2563eb]"></div>
+                  </div>
+                ) : (
+                  <>
+                    <button 
+                      onClick={handleLogin}
+                      className={`w-full h-12 font-title font-bold rounded-full transition-all cursor-pointer active:scale-95 duration-300 flex items-center justify-center gap-2 border ${
+                        darkMode ? 'bg-white text-slate-900 hover:bg-slate-200 border-transparent' : 'bg-white text-[#191b23] border-[#e1e2ed] hover:bg-slate-50'
+                      }`}
+                    >
+                      <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5" />
+                      Iniciar Sesión con Google
+                    </button>
+                    <button 
+                      onClick={() => setScreen('app')}
+                      className={`w-full h-12 font-title font-bold rounded-full transition-all cursor-pointer active:scale-95 duration-300 flex items-center justify-center gap-2 ${
+                        darkMode ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-[#2563eb] text-white hover:bg-[#004ac6]'
+                      }`}
+                    >
+                      Continuar como Invitado
+                    </button>
+                  </>
+                )}
               </div>
 
               <footer className={`text-xs ${darkMode ? 'text-slate-400' : 'text-[#737686]'}`}>
@@ -638,7 +875,10 @@ export default function Home() {
                   Ayuda
                 </button>
                 <button 
-                  onClick={() => setScreen('login')}
+                  onClick={async () => {
+                    await signOut(auth);
+                    setScreen('login');
+                  }}
                   className={`flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-semibold mt-1 text-left cursor-pointer transition-colors ${
                     darkMode ? 'text-red-400 hover:bg-red-950/30' : 'text-red-600 hover:bg-red-50'
                   }`}
@@ -1828,7 +2068,13 @@ export default function Home() {
                                 <input 
                                   type="checkbox" 
                                   checked={alarms.cambioMateria}
-                                  onChange={() => setAlarms(p => ({ ...p, cambioMateria: !p.cambioMateria }))}
+                                  onChange={async () => {
+                                    const next = { ...alarms, cambioMateria: !alarms.cambioMateria };
+                                    setAlarms(next);
+                                    if (user) {
+                                      try { await updateDoc(doc(db, 'users', user.uid), { alarms: next }); } catch (e) {}
+                                    }
+                                  }}
                                   className="h-4 w-7 accent-[#2563eb] cursor-pointer"
                                 />
                               </div>
@@ -1852,7 +2098,13 @@ export default function Home() {
                                 <input 
                                   type="checkbox" 
                                   checked={alarms.finSesion}
-                                  onChange={() => setAlarms(p => ({ ...p, finSesion: !p.finSesion }))}
+                                  onChange={async () => {
+                                    const next = { ...alarms, finSesion: !alarms.finSesion };
+                                    setAlarms(next);
+                                    if (user) {
+                                      try { await updateDoc(doc(db, 'users', user.uid), { alarms: next }); } catch (e) {}
+                                    }
+                                  }}
                                   className="h-4 w-7 accent-[#2563eb] cursor-pointer"
                                 />
                               </div>
@@ -2011,7 +2263,8 @@ export default function Home() {
                   <label className={`text-xs mb-1.5 block ${darkMode ? 'text-slate-300' : 'text-[#737686]'}`}>Asigna tu límite de sesión diario (Mins)</label>
                   <input 
                     type="number" 
-                    defaultValue={320}
+                    value={dailyLimitMinutes}
+                    onChange={(e) => setDailyLimitMinutes(Number(e.target.value))}
                     className={`w-full text-sm p-3 border rounded-xl focus:ring-1 focus:ring-[#2563eb] focus:outline-none h-[42px] ${
                       darkMode ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-[#c3c6d7]'
                     }`}
@@ -2020,7 +2273,21 @@ export default function Home() {
               </div>
               <div className="flex gap-3 pt-4">
                 <button 
-                  onClick={() => setIsSettingsOpen(false)}
+                  onClick={async () => {
+                    if (user) {
+                      try {
+                        await updateDoc(doc(db, 'users', user.uid), {
+                          userName: userName,
+                          dailyLimitMinutes: dailyLimitMinutes,
+                          alarms: alarms,
+                          updatedAt: new Date()
+                        });
+                      } catch (err) {
+                        handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}`);
+                      }
+                    }
+                    setIsSettingsOpen(false);
+                  }}
                   className="flex-1 py-2.5 bg-[#2563eb] text-white font-title font-bold text-xs rounded-xl hover:bg-blue-700 cursor-pointer"
                 >
                   Guardar Cambios

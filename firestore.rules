@@ -1,0 +1,137 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Primitives
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isSignedIn() { return request.auth != null && request.auth.token.email_verified == true; }
+
+    // Validation Blueprint for User
+    function isValidUser(data) {
+      return data.keys().hasAll(['userName', 'dailyLimitMinutes', 'alarms', 'createdAt', 'updatedAt']) &&
+             data.keys().size() == 5 &&
+             data.userName is string && data.userName.size() > 0 && data.userName.size() <= 64 &&
+             data.dailyLimitMinutes is number &&
+             data.alarms.keys().hasOnly(['cambioMateria', 'finSesion']) &&
+             data.alarms.cambioMateria is bool && data.alarms.finSesion is bool &&
+             data.createdAt is timestamp && data.updatedAt is timestamp;
+    }
+    
+    // Validation Blueprint for Subject
+    function isValidSubject(data) {
+      return data.keys().hasAll(['userId', 'name', 'subtitle', 'color', 'createdAt', 'updatedAt']) &&
+             data.keys().size() == 6 &&
+             data.userId == request.auth.uid &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 128 &&
+             data.subtitle is string && data.subtitle.size() <= 256 &&
+             data.color is string && data.color.size() <= 32 &&
+             data.createdAt is timestamp && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint for Task
+    function isValidTask(data) {
+      return data.keys().hasAll(['userId', 'title', 'date', 'subject', 'estimatedMinutes', 'workload', 'isCompleted', 'createdAt', 'updatedAt']) &&
+             data.keys().size() == 9 &&
+             data.userId == request.auth.uid &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 128 &&
+             data.date is string && data.date.size() <= 32 &&
+             data.subject is string && data.subject.size() <= 128 &&
+             data.estimatedMinutes is number &&
+             data.workload in ['Alta', 'Media', 'Óptima'] &&
+             data.isCompleted is bool &&
+             data.createdAt is timestamp && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint for CalendarEvent
+    function isValidCalendarEvent(data) {
+      return data.keys().hasAll(['userId', 'title', 'date', 'type', 'time', 'createdAt', 'updatedAt']) &&
+             data.keys().size() == 7 &&
+             data.userId == request.auth.uid &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 128 &&
+             data.date is number &&
+             data.type in ['Exámenes', 'Trabajos', 'Deberes'] &&
+             data.time is string && data.time.size() <= 16 &&
+             data.createdAt is timestamp && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint for Extracurricular
+    function isValidExtracurricular(data) {
+      return data.keys().hasAll(['userId', 'title', 'days', 'time', 'createdAt', 'updatedAt']) &&
+             data.keys().size() == 6 &&
+             data.userId == request.auth.uid &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 128 &&
+             data.days is string && data.days.size() <= 128 &&
+             data.time is string && data.time.size() <= 64 &&
+             data.createdAt is timestamp && data.updatedAt is timestamp;
+    }
+
+
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+      allow create: if isSignedIn() && isValidId(userId) && request.auth.uid == userId && isValidUser(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isSignedIn() && isValidId(userId) && request.auth.uid == userId && isValidUser(incoming()) &&
+                    incoming().createdAt == existing().createdAt &&
+                    incoming().updatedAt == request.time &&
+                    incoming().diff(existing()).affectedKeys().hasOnly(['userName', 'dailyLimitMinutes', 'alarms', 'updatedAt']);
+    }
+
+    match /subjects/{subjectId} {
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow get: if isSignedIn() && isValidId(subjectId) && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(subjectId) && isValidSubject(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isSignedIn() && isValidId(subjectId) && existing().userId == request.auth.uid &&
+                    incoming().userId == existing().userId &&
+                    isValidSubject(incoming()) &&
+                    incoming().createdAt == existing().createdAt &&
+                    incoming().updatedAt == request.time &&
+                    incoming().diff(existing()).affectedKeys().hasOnly(['name', 'subtitle', 'color', 'updatedAt']);
+      allow delete: if isSignedIn() && isValidId(subjectId) && resource.data.userId == request.auth.uid;
+    }
+
+    match /tasks/{taskId} {
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow get: if isSignedIn() && isValidId(taskId) && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(taskId) && isValidTask(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isSignedIn() && isValidId(taskId) && existing().userId == request.auth.uid &&
+                    incoming().userId == existing().userId &&
+                    isValidTask(incoming()) &&
+                    incoming().createdAt == existing().createdAt &&
+                    incoming().updatedAt == request.time &&
+                    incoming().diff(existing()).affectedKeys().hasOnly(['title', 'date', 'subject', 'estimatedMinutes', 'workload', 'isCompleted', 'updatedAt']);
+      allow delete: if isSignedIn() && isValidId(taskId) && resource.data.userId == request.auth.uid;
+    }
+
+    match /calendarEvents/{eventId} {
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow get: if isSignedIn() && isValidId(eventId) && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(eventId) && isValidCalendarEvent(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isSignedIn() && isValidId(eventId) && existing().userId == request.auth.uid &&
+                    incoming().userId == existing().userId &&
+                    isValidCalendarEvent(incoming()) &&
+                    incoming().createdAt == existing().createdAt &&
+                    incoming().updatedAt == request.time &&
+                    incoming().diff(existing()).affectedKeys().hasOnly(['title', 'date', 'type', 'time', 'updatedAt']);
+      allow delete: if isSignedIn() && isValidId(eventId) && resource.data.userId == request.auth.uid;
+    }
+
+    match /extracurriculars/{activityId} {
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow get: if isSignedIn() && isValidId(activityId) && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(activityId) && isValidExtracurricular(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isSignedIn() && isValidId(activityId) && existing().userId == request.auth.uid &&
+                    incoming().userId == existing().userId &&
+                    isValidExtracurricular(incoming()) &&
+                    incoming().createdAt == existing().createdAt &&
+                    incoming().updatedAt == request.time &&
+                    incoming().diff(existing()).affectedKeys().hasOnly(['title', 'days', 'time', 'updatedAt']);
+      allow delete: if isSignedIn() && isValidId(activityId) && resource.data.userId == request.auth.uid;
+    }
+  }
+}
