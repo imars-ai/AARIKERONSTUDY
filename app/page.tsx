@@ -104,102 +104,6 @@ export default function Home() {
       alert('Hubo un error al iniciar sesión.');
     }
   };
-
-  // Data fetching
-  useEffect(() => {
-    if (!user) return; // Only sync if authenticated
-
-    const fetchUserDoc = async () => {
-      try {
-        const userRef = doc(db, 'users', user.uid);
-        const userSnap = await getDoc(userRef);
-        if (userSnap.exists()) {
-          const data = userSnap.data();
-          setUserName(data.userName);
-          if (data.dailyLimitMinutes) setDailyLimitMinutes(data.dailyLimitMinutes);
-          if (data.alarms) setAlarms(data.alarms);
-        } else {
-          // Create initial user doc
-          try {
-            await setDoc(userRef, {
-              userName: user.displayName?.split(' ')[0] || 'Estudiante',
-              dailyLimitMinutes: 320,
-              alarms: { cambioMateria: true, finSesion: false },
-              createdAt: new Date(),
-              updatedAt: new Date()
-            });
-            setUserName(user.displayName?.split(' ')[0] || 'Estudiante');
-          } catch (createErr) {
-            handleFirestoreError(createErr, OperationType.CREATE, `users/${user.uid}`);
-          }
-        }
-      } catch (err) {
-        handleFirestoreError(err, OperationType.GET, `users/${user.uid}`);
-      }
-    };
-    fetchUserDoc();
-
-    // Subjects Sync
-    const subjectsUnsub = onSnapshot(query(collection(db, 'subjects'), where('userId', '==', user.uid)), (snapshot) => {
-      const s: Subject[] = [];
-      snapshot.forEach((doc) => {
-        const d = doc.data();
-        s.push({
-          id: doc.id,
-          name: d.name,
-          subtitle: d.subtitle,
-          color: d.color,
-          // simulated values for metrics
-          tasksCount: 0,
-          workload: 'Óptima',
-          progressVal: 0,
-          iconName: 'book'
-        });
-      });
-      if (s.length > 0) setSubjects(s);
-    }, (error) => handleFirestoreError(error, OperationType.LIST, 'subjects'));
-
-    // Tasks Sync
-    const tasksUnsub = onSnapshot(query(collection(db, 'tasks'), where('userId', '==', user.uid)), (snapshot) => {
-      const t: Task[] = [];
-      snapshot.forEach((doc) => {
-        const d = doc.data();
-        t.push({
-          id: doc.id,
-          title: d.title,
-          subject: d.subject,
-          dueDate: d.date,
-          duration: d.estimatedMinutes,
-          workload: d.workload,
-          completed: d.isCompleted,
-        });
-      });
-      if (t.length > 0) setTasks(t);
-    }, (error) => handleFirestoreError(error, OperationType.LIST, 'tasks'));
-
-    // Calendar Events Sync
-    const calUnsub = onSnapshot(query(collection(db, 'calendarEvents'), where('userId', '==', user.uid)), (snapshot) => {
-      const evs: CalendarEvent[] = [];
-      snapshot.forEach((doc) => {
-        const d = doc.data();
-        evs.push({
-          id: doc.id,
-          day: d.date,
-          title: d.title,
-          time: d.time,
-          type: d.type as any,
-          subtitle: ''
-        });
-      });
-      if (evs.length > 0) setCalendarEvents(evs);
-    }, (error) => handleFirestoreError(error, OperationType.LIST, 'calendarEvents'));
-
-    return () => {
-      subjectsUnsub();
-      tasksUnsub();
-      calUnsub();
-    };
-  }, [user]);
   
   // App navigation state
   const [activeTab, setActiveTab] = useState<'dashboard' | 'calendar' | 'subjects' | 'smart_org' | 'study_time'>('dashboard');
@@ -299,6 +203,102 @@ export default function Home() {
   const [timerActive, setTimerActive] = useState(false);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Data fetching (moved downstream to resolve use-before-define)
+  useEffect(() => {
+    if (!user) return; // Only sync if authenticated
+
+    const fetchUserDoc = async () => {
+      try {
+        const userRef = doc(db, 'users', user.uid);
+        const userSnap = await getDoc(userRef);
+        if (userSnap.exists()) {
+          const data = userSnap.data();
+          setUserName(data.userName);
+          if (data.dailyLimitMinutes) setDailyLimitMinutes(data.dailyLimitMinutes);
+          if (data.alarms) setAlarms(data.alarms);
+        } else {
+          // Create initial user doc
+          try {
+            await setDoc(userRef, {
+              userName: user.displayName?.split(' ')[0] || 'Estudiante',
+              dailyLimitMinutes: 320,
+              alarms: { cambioMateria: true, finSesion: false },
+              createdAt: new Date(),
+              updatedAt: new Date()
+            });
+            setUserName(user.displayName?.split(' ')[0] || 'Estudiante');
+          } catch (createErr) {
+            handleFirestoreError(createErr, OperationType.CREATE, `users/${user.uid}`);
+          }
+        }
+      } catch (err) {
+        handleFirestoreError(err, OperationType.GET, `users/${user.uid}`);
+      }
+    };
+    fetchUserDoc();
+
+    // Subjects Sync
+    const subjectsUnsub = onSnapshot(query(collection(db, 'subjects'), where('userId', '==', user.uid)), (snapshot) => {
+      const s: Subject[] = [];
+      snapshot.forEach((doc) => {
+        const d = doc.data();
+        s.push({
+          id: doc.id,
+          name: d.name,
+          subtitle: d.subtitle,
+          color: d.color,
+          // simulated values for metrics
+          tasksCount: 0,
+          workload: 'Óptima',
+          progressVal: 0,
+          iconName: 'book'
+        });
+      });
+      if (s.length > 0) setSubjects(s);
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'subjects'));
+
+    // Tasks Sync
+    const tasksUnsub = onSnapshot(query(collection(db, 'tasks'), where('userId', '==', user.uid)), (snapshot) => {
+      const t: Task[] = [];
+      snapshot.forEach((doc) => {
+        const d = doc.data();
+        t.push({
+          id: doc.id,
+          title: d.title,
+          subject: d.subject,
+          dueDate: d.date,
+          duration: d.estimatedMinutes,
+          workload: d.workload,
+          completed: d.isCompleted,
+        });
+      });
+      if (t.length > 0) setTasks(t);
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'tasks'));
+
+    // Calendar Events Sync
+    const calUnsub = onSnapshot(query(collection(db, 'calendarEvents'), where('userId', '==', user.uid)), (snapshot) => {
+      const evs: CalendarEvent[] = [];
+      snapshot.forEach((doc) => {
+        const d = doc.data();
+        evs.push({
+          id: doc.id,
+          day: d.date,
+          title: d.title,
+          time: d.time,
+          type: d.type as any,
+          subtitle: ''
+        });
+      });
+      if (evs.length > 0) setCalendarEvents(evs);
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'calendarEvents'));
+
+    return () => {
+      subjectsUnsub();
+      tasksUnsub();
+      calUnsub();
+    };
+  }, [user]);
+
   const handleSetTimerMode = (mode: 'study' | 'short' | 'long') => {
     setTimerMode(mode);
     let mins = 25;
@@ -349,7 +349,7 @@ export default function Home() {
   };
 
   const progressOffset = () => {
-    const strokeDash = 880;
+    const strokeDash = 502;
     const ratio = timeLeft / totalTime;
     return strokeDash - ratio * strokeDash;
   };
@@ -1939,12 +1939,12 @@ export default function Home() {
                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                       
                       {/* Left: Pomodoro clock circular visualization */}
-                      <section className={`bento-card p-8 flex flex-col items-center justify-center min-h-[480px] border transition-all ${
+                      <section className={`lg:col-span-7 bento-card p-8 flex flex-col items-center justify-center min-h-[480px] border transition-all ${
                         darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-[#e1e2ed] text-[#191b23]'
                       }`}>
-                        {/* Session Switchers */}
+                         {/* Session Switchers */}
                         <div className={`flex gap-2 mb-8 p-1.5 rounded-full border transition-all ${
-                          darkMode ? 'bg-slate-705 border-slate-600' : 'bg-[#f3f3fe] border-[#e1e2ed]'
+                          darkMode ? 'bg-slate-700 border-slate-600' : 'bg-[#f3f3fe] border-[#e1e2ed]'
                         }`}>
                           <button 
                             onClick={() => handleSetTimerMode('study')}
@@ -1980,17 +1980,17 @@ export default function Home() {
 
                         {/* Circular Timer Ring */}
                         <div className="relative w-64 h-64 md:w-80 md:h-80 flex items-center justify-center">
-                          <svg className="w-full h-full -rotate-90">
-                            <circle cx="50%" cy="50%" fill="transparent" r="44%" stroke={darkMode ? '#334155' : '#f3f3fe'} strokeWidth="8" />
+                          <svg className="w-full h-full transform -rotate-90 origin-center" viewBox="0 0 200 200">
+                            <circle cx="100" cy="100" fill="transparent" r="80" stroke={darkMode ? '#334155' : '#f3f3fe'} strokeWidth="8" />
                             <circle 
                               className="timer-circle" 
-                              cx="50%" 
-                              cy="50%" 
+                              cx="100" 
+                              cy="100" 
                               fill="transparent" 
-                              r="44%" 
+                              r="80" 
                               stroke="#2563eb" 
                               strokeWidth="11" 
-                              strokeDasharray="880" 
+                              strokeDasharray="502" 
                               strokeDashoffset={progressOffset()} 
                               strokeLinecap="round"
                             />
@@ -2006,7 +2006,7 @@ export default function Home() {
                         </div>
 
                         {/* Control actions */}
-                        <div className="flex gap-4 mt-8">
+                        <div className="flex items-center gap-4 mt-8">
                           <button 
                             onClick={handleResetTimer}
                             className={`h-12 w-12 rounded-full border flex items-center justify-center transition-all cursor-pointer ${
